@@ -40,24 +40,35 @@ func main() {
 	}
 	botRegex := regexp.MustCompile(fmt.Sprintf("^.*(%s).*$", strings.Join(bots, "|")))
 
+	ttl_default := "15"
+	if given, ok := os.LookupEnv("TTL_DEFAULT"); ok {
+		ttl_default = given
+	}
+
+	views_default := "2"
+	if given, ok := os.LookupEnv("VIEWS_DEFAULT"); ok {
+		views_default = given
+	}
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w,
 			layout,
-			`<form action='/new' method='POST'>
+			fmt.Sprintf(`<form action='/new' method='POST'>
 			   <textarea cols=40 rows=20 name='content'></textarea>
-			   Expire in minutes: <input type='text' name='expire' value='15' /><br />
-			   Views before expiration: <input type='text' name='views' value='2' /><br />
+			   Time to live (in minutes): <input type='text' name='ttl' value='%s' /><br />
+			   Views before expiration: <input type='text' name='views' value='%s' /><br />
 			   <br />
 			   <input type='submit' style='float: right;' />
 			 </form>`,
-		)
+				ttl_default,
+				views_default))
 	})
 
 	http.HandleFunc("/new", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 			r.ParseForm()
 			content := r.PostFormValue("content")
-			expire, err := strconv.Atoi(r.PostFormValue("expire"))
+			ttl, err := strconv.Atoi(r.PostFormValue("ttl"))
 			if err != nil {
 				panic(err)
 			}
@@ -66,7 +77,7 @@ func main() {
 				panic(err)
 			}
 
-			uuid := store.Set(content, views, 60*expire)
+			uuid := store.Set(content, views, 60*ttl)
 			url := fmt.Sprintf("https://%s/show/%s", r.Host, uuid)
 			fmt.Fprintf(w, layout,
 				fmt.Sprintf(
