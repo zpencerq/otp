@@ -99,7 +99,12 @@ func main() {
 			key := p[2]
 			if store.Exists(key) {
 				fmt.Fprintf(w, layout,
-					fmt.Sprintf("<hr>%s", html.EscapeString(*store.Get(key))))
+					fmt.Sprintf("<hr>%s",
+						strings.Replace(
+							html.EscapeString(*store.Get(key)),
+							"\n", "<br />",
+							-1)),
+				)
 			} else {
 				w.WriteHeader(http.StatusNotFound)
 				fmt.Fprintf(w, layout, "The paste never existed or has expired.")
