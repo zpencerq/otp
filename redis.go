@@ -11,8 +11,8 @@ import (
 
 type RedisStore struct {
 	sync.Mutex
-	conn    net.Conn
-	scanner *bufio.Scanner
+	conn   net.Conn
+	reader *bufio.Reader
 }
 
 func NewRedisStore(host string) *RedisStore {
@@ -22,8 +22,8 @@ func NewRedisStore(host string) *RedisStore {
 	}
 
 	return &RedisStore{
-		conn:    conn,
-		scanner: bufio.NewScanner(conn),
+		conn:   conn,
+		reader: bufio.NewReader(conn),
 	}
 }
 
@@ -43,26 +43,31 @@ func (rs *RedisStore) runCmd(args ...string) string {
 
 	rs.conn.Write([]byte(result))
 
-	rs.scanner.Scan()
-	return rs.scanner.Text()
+	raw, _ := rs.reader.ReadBytes('\n')
+	return string(raw[:len(raw)-2])
 }
 
 func (rs *RedisStore) Get(key string) *string {
 	rs.Lock()
 	defer rs.Unlock()
 
-	rs.runCmd("HGET", key, "content")
+	resp := rs.runCmd("HGET", key, "content")
 
-	rs.scanner.Scan()
-	value := rs.scanner.Text()
+	n, err := strconv.Atoi(resp[1:])
+	if err != nil {
+		panic(err)
+	}
+
+	bytes := make([]byte, n)
+	rs.reader.Read(bytes)
+	rs.reader.Discard(2) // throw away next \r\n
+	value := string(bytes)
 
 	rs.runCmd("HINCRBY", key, "views", "-1")
 	rs.runCmd("HGET", key, "views")
 
-	rs.scanner.Scan()
-	raw_views := rs.scanner.Text()
-
-	if views, _ := strconv.Atoi(strings.TrimSpace(string(raw_views))); views <= 0 {
+	raw_views, _ := rs.reader.ReadBytes('\n')
+	if views, _ := strconv.Atoi(string(raw_views[:len(raw_views)-2])); views <= 0 {
 		rs.runCmd("DEL", key)
 	}
 
