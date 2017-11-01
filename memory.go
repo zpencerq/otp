@@ -9,43 +9,55 @@ type Entry struct {
 
 type MemoryStore map[string]Entry
 
+type MemoryConn struct {
+	store *MemoryStore
+}
+
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{}
 }
 
-func (ms *MemoryStore) Get(key string) *string {
-	result := (*ms)[key]
+func (ms *MemoryStore) NewConn() OneTimeStoreConn {
+	return &MemoryConn{ms}
+}
+
+func (mc *MemoryConn) Get(key string) *string {
+	result := (*mc.store)[key]
 
 	result.views = result.views - 1
-	(*ms)[key] = result
+	(*mc.store)[key] = result
 
 	if result.views == 0 {
-		if _, ok := (*ms)[key]; ok {
-			delete(*ms, key)
+		if _, ok := (*mc.store)[key]; ok {
+			delete(*mc.store, key)
 		}
 	}
 
 	return result.content
 }
 
-func (ms *MemoryStore) Exists(key string) bool {
-	_, ok := (*ms)[key]
+func (mc *MemoryConn) Exists(key string) bool {
+	_, ok := (*mc.store)[key]
 	return ok
 }
 
-func (ms *MemoryStore) Set(content string, views int, expire int) string {
+func (mc *MemoryConn) Set(content string, views int, expire int) string {
 	key := generateUUID()
-	(*ms)[key] = Entry{
+	(*mc.store)[key] = Entry{
 		content: &content,
 		views:   views,
 	}
 
 	go func() {
 		time.Sleep(time.Second * time.Duration(expire))
-		if _, ok := (*ms)[key]; ok {
-			delete(*ms, key)
+		if _, ok := (*mc.store)[key]; ok {
+			delete(*mc.store, key)
 		}
 	}()
 
 	return key
+}
+
+func (rc *MemoryConn) Close() error {
+	return nil
 }

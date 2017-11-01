@@ -7,27 +7,44 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type RedisStore struct {
+	host string
+}
+
+type RedisConn struct {
 	sync.Mutex
-	conn   net.Conn
+	net.Conn
 	reader *bufio.Reader
 }
 
-func NewRedisStore(host string) *RedisStore {
-	conn, err := net.Dial("tcp", host)
+func NewRedisStore(host string) OneTimeStore {
+	conn, err := net.DialTimeout("tcp", host, time.Duration(1)*time.Second)
+	if err != nil {
+		panic(err)
+	}
+	conn.Close()
+
+	return &RedisStore{
+		host: host,
+	}
+}
+
+func (rs *RedisStore) NewConn() OneTimeStoreConn {
+	conn, err := net.DialTimeout("tcp", rs.host, time.Duration(10)*time.Second)
 	if err != nil {
 		panic(err)
 	}
 
-	return &RedisStore{
-		conn:   conn,
+	return &RedisConn{
+		Conn:   conn,
 		reader: bufio.NewReader(conn),
 	}
 }
 
-func (rs *RedisStore) runCmd(args ...string) string {
+func (rc *RedisConn) runCmd(args ...string) string {
 	chunks := []string{
 		fmt.Sprintf("*%d", len(args)),
 	}
@@ -41,17 +58,17 @@ func (rs *RedisStore) runCmd(args ...string) string {
 
 	result := strings.Join(chunks, "\r\n")
 
-	rs.conn.Write([]byte(result))
+	rc.Conn.Write([]byte(result))
 
-	raw, _ := rs.reader.ReadBytes('\n')
+	raw, _ := rc.reader.ReadBytes('\n')
 	return string(raw[:len(raw)-2])
 }
 
-func (rs *RedisStore) Get(key string) *string {
-	rs.Lock()
-	defer rs.Unlock()
+func (rc *RedisConn) Get(key string) *string {
+	rc.Lock()
+	defer rc.Unlock()
 
-	resp := rs.runCmd("HGET", key, "content")
+	resp := rc.runCmd("HGET", key, "content")
 
 	n, err := strconv.Atoi(resp[1:])
 	if err != nil {
@@ -59,37 +76,41 @@ func (rs *RedisStore) Get(key string) *string {
 	}
 
 	bytes := make([]byte, n)
-	rs.reader.Read(bytes)
-	rs.reader.Discard(2) // throw away next \r\n
+	rc.reader.Read(bytes)
+	rc.reader.Discard(2) // throw away next \r\n
 	value := string(bytes)
 
-	rs.runCmd("HINCRBY", key, "views", "-1")
-	rs.runCmd("HGET", key, "views")
+	rc.runCmd("HINCRBY", key, "views", "-1")
+	rc.runCmd("HGET", key, "views")
 
-	raw_views, _ := rs.reader.ReadBytes('\n')
+	raw_views, _ := rc.reader.ReadBytes('\n')
 	if views, _ := strconv.Atoi(string(raw_views[:len(raw_views)-2])); views <= 0 {
-		rs.runCmd("DEL", key)
+		rc.runCmd("DEL", key)
 	}
 
 	return &value
 
 }
 
-func (rs *RedisStore) Exists(key string) bool {
-	rs.Lock()
-	defer rs.Unlock()
+func (rc *RedisConn) Exists(key string) bool {
+	rc.Lock()
+	defer rc.Unlock()
 
-	response := rs.runCmd("EXISTS", key)
+	response := rc.runCmd("EXISTS", key)
 	return response[1] == '1'
 }
 
-func (rs *RedisStore) Set(content string, views int, expire int) string {
-	rs.Lock()
-	defer rs.Unlock()
+func (rc *RedisConn) Set(content string, views int, expire int) string {
+	rc.Lock()
+	defer rc.Unlock()
 
 	key := generateUUID()
-	rs.runCmd("HMSET", key, "content", content, "views", strconv.Itoa(views))
-	rs.runCmd("EXPIRE", key, strconv.Itoa(expire))
+	rc.runCmd("HMSET", key, "content", content, "views", strconv.Itoa(views))
+	rc.runCmd("EXPIRE", key, strconv.Itoa(expire))
 
 	return key
+}
+
+func (rc *RedisConn) Close() error {
+	return rc.Conn.Close()
 }

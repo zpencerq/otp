@@ -77,7 +77,9 @@ func main() {
 				panic(err)
 			}
 
-			uuid := store.Set(content, views, 60*ttl)
+			otp := store.NewConn()
+			defer otp.Close()
+			uuid := otp.Set(content, views, 60*ttl)
 			url := fmt.Sprintf("https://%s/show/%s", r.Host, uuid)
 			fmt.Fprintf(w, layout,
 				fmt.Sprintf(
@@ -105,14 +107,16 @@ func main() {
 			return
 		}
 
+		otp := store.NewConn()
+		defer otp.Close()
 		p := strings.Split(r.URL.Path, "/")
 		if len(p) == 3 {
 			key := p[2]
-			if store.Exists(key) {
+			if otp.Exists(key) {
 				fmt.Fprintf(w, layout,
 					fmt.Sprintf("<hr>%s",
 						strings.Replace(
-							html.EscapeString(*store.Get(key)),
+							html.EscapeString(*otp.Get(key)),
 							"\n", "<br />",
 							-1)),
 				)
